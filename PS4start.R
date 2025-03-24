@@ -11,6 +11,8 @@
   library(modelsummary)
   library(gt)
   library(data.table)
+  library(kableExtra)
+  
 
 
 # create the dataset ------------------
@@ -59,64 +61,153 @@
   
   summary(covid)
 
+# graph theme ----------
+  theme_personalized = theme_classic() +
+    theme(
+      axis.title.x = element_text(size = 9),
+      axis.title.y = element_text(size = 9),
+      legend.text = element_text(size = 9),
+      text = element_text(family = "Times")
+    )
   
 # COVID deaths nationally ----------
 ## VIZ  
   covid %>%
     ggplot(aes(x = (1 + deaths))) +
-    geom_histogram(color = 'white') +
-    scale_x_log10() # to mitigate skew
+    geom_histogram(color = 'white', fill = '#900603') +
+    scale_x_log10() + # to mitigate skew
+    scale_y_continuous(
+      expand = expansion(mult = c(0,0.05))
+    ) +
+    labs(x = "# of deaths",
+         y = "# of counties"
+         ) +
+    theme_personalized
 
 ## stat summary and more
   summary(covid$deaths)
   # find some examples?
-
-
+  
+  # percent of counties with less than 1000 deaths
+  covid %>%
+    filter(deaths < 1000) %>%
+    nrow() / nrow(covid) * 100 
+  
+  # table with summary stats for mean and median
+  median_counties <- covid %>%
+    filter(deaths == 29)
+  
+  mean_countires <- covid %>%
+    filter(deaths <= 85,
+           deaths >= 84)
 # Mask usage -----------------------
 ## VIZ: "Always wears a mask"
   covid %>%
     ggplot(aes(x = always.mask)) +
-    geom_histogram(color = 'white')
-
+    geom_histogram(color = 'white', fill = '#900603') +
+    scale_x_continuous(labels = scales::percent_format(scale = 100)) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0,0.05))
+      ) +
+    labs(x = "% of people who 'always wear a mask'",
+         y = "# of counties"
+    ) +
+    theme_personalized
+  
 ## helpers
   summary(covid$always.mask)
+  
+  covid %>%
+    filter(always.mask < 0.613,
+           always.mask > 0.393) %>%
+    nrow() / nrow(covid) * 100
   # find hi/lo counties?
-
+  hi_lo_mask <- covid %>%
+    filter(always.mask %in% c(
+      min(always.mask, na.rm = TRUE), 
+      max(always.mask, na.rm = TRUE)))
 
 # Rates of vaccination -------------
 
 ## VIZ: overall vax rates
   covid %>%
     ggplot(aes(x = vax.complete)) +
-    geom_histogram(color = 'white')
+    geom_histogram(color = 'white', fill = '#900603') +
+    scale_x_continuous(
+      labels = scales::percent_format(scale = 1),
+      breaks = seq(0, 75, by = 25)) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0,0.05))
+    ) +
+    labs(x = "% of people who are completely vaccinated",
+         y = "# of counties"
+    ) +
+    theme_personalized
 
+  summary(covid$vax.complete)
+  
+  covid %>%
+    filter(vax.complete > 50) %>%
+    nrow() / nrow(covid) * 100
 ## VIZ: vax rates by Social Vulnerability Index category
   covid %>%
-    ggplot(aes(y = vax.complete, x = svi.index, color = svi.index)) +
-    geom_boxplot() # drop the NA category; it's awful
+    filter(!is.na(svi.index)) %>%
+    ggplot(aes(x = vax.complete, y = svi.index)) +
+    geom_boxplot(outlier.shape = 16, outlier.size = 3, outlier.color = "#900603", alpha = 0.4) + 
+    scale_x_continuous(
+      labels = scales::percent_format(scale = 1)) +
+    labs(y = "Social Vulnerability Index", 
+         x = "% Vaccination Completion"
+         ) +
+    theme_personalized
+
+  covid %>%
+    filter(svi.index == "D") %>%
+    summary(vax.complete)
+  
 
 ## find high/low counties
   covid %>%
     select(vax.complete, state, county) %>%
     filter(vax.complete %in% c(min(vax.complete, na.rm = T), 
-                               max(vax.complete, na.rm = T)))
+                               max(vax.complete, na.rm = T))) %>%
+    arrange(desc(vax.complete)) %>%
+    knitr::kable(
+      col.names = c("% fully vaccinated", "State", "County"),
+      booktabs = TRUE, align = "c"
+    ) %>%
+    kableExtra::kable_styling(latex_options = "striped")
 
 
 # Impact on 2022 COVID deaths ------
 ## regression estimates
   mods <- 
     list(
-      m1 = felm(deaths.scaled ~ always.mask + population + svi.index | state, data = covid),
-      m2 = felm(deaths.scaled ~ vax.complete + population + svi.index | state, data = covid),
-      m3 = felm(deaths.scaled ~ always.mask + vax.complete + svi.index | state, data = covid)
+      "Masks" = felm(deaths.scaled ~ always.mask + population + svi.index | state, data = covid),
+      "Vaccination" = felm(deaths.scaled ~ vax.complete + population + svi.index | state, data = covid),
+      "Masks and Vaccination" = felm(deaths.scaled ~ always.mask + vax.complete + svi.index | state, data = covid)
     )
 
 ## regression table
-  modelsummary(
+  table <- modelsummary(
     mods, 
-    gof_map = c('nobs'), 
-    stars = TRUE, 
-    output = 'gt'
+    coef_order = c("always.mask", "vax.complete", "population", "svi.indexB", "svi.indexC", "svi.indexD"),
+    coef_rename = c(
+      "always.mask" = "Mask Usage", 
+      "vax.complete" = "Vaccine Completion", 
+      "population" = "Population",
+      "svi.indexB" = "SVI - B",
+      "svi.indexC" = "SVI - C",
+      "svi.indexD" = "SVI - D"
+    ),
+    gof_map = c('nobs'),
+    output = 'gt',
+    star = TRUE
   )
-
-
+  
+### Add header above the table
+  table %>%
+    tab_spanner(
+      label = "Number of deaths",
+      columns = c(`Masks`, `Vaccination`, `Masks and Vaccination`)
+    ) 
